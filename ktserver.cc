@@ -2734,7 +2734,7 @@ static void usage() {
           " [-pk file] [-cert file] [-rpk file] [-rcert file] [-tout num]"
           " [-th num] [-log file] [-li|-ls|-le|-lz]"
           " [-ulog dir] [-ulim num] [-uasi num] [-sid num] [-ord] [-oat|-oas|-onl|-otl|-onr]"
-          " [-asi num] [-ash] [-bgs dir] [-bgsi num] [-bgc str]"
+          " [-asi num] [-ash] [-bgs dir] [-bgsi num] [-bgsc str]"
           " [-dmn] [-pid file] [-cmd dir] [-scr file]"
           " [-mhost str] [-mport num] [-rts file] [-riv num]"
           " [-plsv file] [-plex str] [-pldb file] [db...]\n", g_progname);

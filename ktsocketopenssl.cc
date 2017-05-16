@@ -23,8 +23,17 @@ extern "C" {
 #include <openssl/err.h>
 #include <openssl/conf.h>
 #include <openssl/engine.h>
-
 }
+
+#define SSL_OP_MINPROTO_SSLv2   0
+#define SSL_OP_MINPROTO_SSLv3   (SSL_OP_MINPROTO_SSLv2   | SSL_OP_NO_SSLv2)
+#define SSL_OP_MINPROTO_TLSv1   (SSL_OP_MINPROTO_SSLv3   | SSL_OP_NO_SSLv3)
+#define SSL_OP_MINPROTO_TLSv1_1 (SSL_OP_MINPROTO_TLSv1   | SSL_OP_NO_TLSv1)
+#define SSL_OP_MINPROTO_TLSv1_2 (SSL_OP_MINPROTO_TLSv1_1 | SSL_OP_NO_TLSv1_1)
+
+#if OPENSSL_VERSION_NUMBER >= 0x10100000L
+#define OPENSSL_NEW_THREADING_MODEL
+#endif
 
 namespace kyototycoon {                  // common namespace
 
@@ -62,8 +71,10 @@ static pthread_once_t g_once_control_init = PTHREAD_ONCE_INIT;
 static pthread_once_t g_once_control_teardown = PTHREAD_ONCE_INIT;
 static void init_ssl();
 static void teardown_ssl();
-static pthread_mutex_t *ssl_locks = NULL;
 
+#ifndef OPENSSL_NEW_THREADING_MODEL
+static pthread_mutex_t *ssl_locks = NULL;
+#endif
 /**
  * Set the error message from OpenSSL.
  */
@@ -165,7 +176,8 @@ bool SecChannel::bind_server(int32_t fd, const char* ca, const char* pk, const c
   EC_KEY *ecdh = NULL;
   SecChannelOpenSSL* core = (SecChannelOpenSSL*)opq_;
   core->state = SecChannel::SSNEGOTIATING;
-  core->ctx = SSL_CTX_new(TLSv1_2_server_method());
+  core->ctx = SSL_CTX_new(SSLv23_server_method());
+  SSL_CTX_set_options(core->ctx, SSL_OP_MINPROTO_TLSv1_2);
   if (core->ctx == NULL) {
     seterrmsg(core, SEInternal, "SSL_CTX_new failed");
     goto fail;
@@ -273,7 +285,9 @@ bool SecChannel::bind_client(int32_t fd, const char* ca, const char* pk, const c
   SecChannelOpenSSL* core = (SecChannelOpenSSL*)opq_;
   STACK_OF(X509_NAME) *cert_names;
   core->state = SecChannel::SSNEGOTIATING;
-  core->ctx = SSL_CTX_new(TLSv1_2_client_method());
+  core->ctx = SSL_CTX_new(SSLv23_client_method());
+  SSL_CTX_set_options(core->ctx, SSL_OP_MINPROTO_TLSv1_2);
+
   if (core->ctx == NULL) {
     seterrmsg(core, SEInternal, "SSL_CTX_new failed");
     goto fail;
@@ -468,6 +482,7 @@ static void seterrmsg(SecChannelOpenSSL *core, SecChannel::SecError error,
   core->errmsg = msg;
 }
 
+#ifndef OPENSSL_NEW_THREADING_MODEL
 void ssl_threadid_func(CRYPTO_THREADID *id) {
   CRYPTO_THREADID_set_numeric(id, (unsigned long)pthread_self());
 }
@@ -478,8 +493,12 @@ void ssl_lock_func(int mode, int n, const char *file, int line) {
       pthread_mutex_unlock(&ssl_locks[n]);
   }
 }
+#endif
 
 static void init_ssl() {
+#ifdef OPENSSL_NEW_THREADING_MODEL
+  OPENSSL_init_ssl(0, NULL);
+#else
   SSL_load_error_strings();
   SSL_library_init();
   OpenSSL_add_all_algorithms();
@@ -495,14 +514,24 @@ static void init_ssl() {
 
   CRYPTO_THREADID_set_callback(ssl_threadid_func);
   CRYPTO_set_locking_callback(ssl_lock_func);
+#endif
 }
 
 static void teardown_ssl() {
   CONF_modules_unload(1);
+#ifdef OPENSSL_NEW_THREADING_MODEL
+  OPENSSL_cleanup();
+#else
   EVP_cleanup();
   ENGINE_cleanup();
   CRYPTO_cleanup_all_ex_data();
+#if OPENSSL_VERSION_NUMBER < 0x10000000L
+  /* This was deprecated by ERR_remove_thread_state(NULL) in v1.0.0. */
   ERR_remove_state(0);
+#elif OPENSSL_VERSION_NUMBER < 0x10100000L
+  /* This was marked as deprecated in v1.1. */
+  ERR_remove_thread_state(NULL);
+#endif
   ERR_free_strings();
 
   if (ssl_locks != NULL) {
@@ -511,6 +540,7 @@ static void teardown_ssl() {
     }
     free(ssl_locks);
   }
+#endif
 }
 
 /**
